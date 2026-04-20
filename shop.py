@@ -13,13 +13,13 @@ from aiogram.types import LabeledPrice
 from telethon import TelegramClient
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = "8796403308:AAGbI4AP00VVuJlUQgwweigNu58o-kdGyPM"
+BOT_TOKEN = "8773069226:AAG9a5O7COF4eben7TEzwO6yHg79dDEakRU"
 ADMIN_ID = 8212981789
 SUPPORT_LINK = "https://t.me/zyozp"
 
 # TELETHON (ОБЯЗАТЕЛЬНО ВПИШИ СВОИ ДАННЫЕ)
-API_ID = 1234567 
-API_HASH = 'твой_хэш_от_телеграм_апи'
+API_ID = 37668790 
+API_HASH = '84a0450f9bbf15d1e1d09b47ee25cb49'
 
 # TON (ИЗ ТВОИХ ДАННЫХ)
 TONCENTER_API_KEY = "0e458295f7b90487efe40b089ee219a0d6faa842cba6c3dee5046de3db1532f"

@@ -14,7 +14,7 @@ from aiogram.types import LabeledPrice
 from telethon import TelegramClient
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = "8773069226:AAG9a5O7COF4eben7TEzwO6yHg79dDEakRU"
+BOT_TOKEN = "8796403308:AAGbI4AP00VVuJlUQgwweigNu58o-kdGyPM"
 ADMIN_ID = 8212981789
 SUPPORT_LINK = "https://t.me/zyozp"
 API_ID = 37668790 

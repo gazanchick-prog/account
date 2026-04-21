@@ -22,7 +22,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 DB_NAME = "sifon_market.db"
 
-# Кэш для запущенных клиентов Telethon (чтобы не заходить/выходить постоянно)
+# Хранилище для активных сессий юзерботов (чтобы не перезаходить)
 active_clients = {}
 
 class ShopStates(StatesGroup):
@@ -57,7 +57,7 @@ def main_kb(user_id):
     builder.row(types.KeyboardButton(text="🛒 Купить аккаунты"), types.KeyboardButton(text="👤 Профиль"))
     builder.row(types.KeyboardButton(text="💰 Пополнить баланс"), types.KeyboardButton(text="🔐 Получить код"))
     builder.row(types.KeyboardButton(text="👥 Реферальная система"), types.KeyboardButton(text="📜 История операций"))
-    builder.row(types.KeyboardButton(text="🏆 Топ покупателей"), types.KeyboardButton(text="ℹ️ Информация"))
+    builder.row(types.KeyboardButton(text="🏆 Топ покупателей"), types.KeyboardButton(text="📋 Информация"))
     builder.row(types.KeyboardButton(text="🆘 Поддержка"))
     
     if user_id == ADMIN_ID:
@@ -65,93 +65,64 @@ def main_kb(user_id):
         builder.row(types.KeyboardButton(text="📢 Рассылка"))
     return builder.as_markup(resize_keyboard=True)
 
-# --- ОСНОВНЫЕ ФУНКЦИИ ---
+# --- ОБРАБОТЧИКИ ---
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, command: CommandObject):
-    referrer_id = None
+    ref_id = None
     if command.args and command.args.isdigit():
-        referrer_id = int(command.args)
-        if referrer_id == message.from_user.id:
-            referrer_id = None
+        ref_id = int(command.args)
+        if ref_id == message.from_user.id: ref_id = None
 
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT user_id FROM users WHERE user_id = ?", (message.from_user.id,))
-        user_exists = await cursor.fetchone()
-        
-        if not user_exists:
-            await db.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (message.from_user.id, referrer_id))
+        if not await cursor.fetchone():
+            await db.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (message.from_user.id, ref_id))
             await db.commit()
 
-    text = (
+    welcome_text = (
         "👋 **Добро пожаловать в Sifon Market!**\n\n"
-        "🛒 Покупайте качественные аккаунты по лучшим ценам!\n"
-        "⚡️ Мгновенная выдача товара после покупки.\n"
-        "💰 Пополнение баланса: CryptoBOT, TON.\n"
-        "🔐 Автоматическое получение кода.\n"
-        "👥 Реферальная система: зарабатывайте вместе с нами.\n"
-        "🆘 Круглосуточная поддержка.\n\n"
-        "👇 Выберите действие на клавиатуре ниже:"
+        "🛒 Покупайте качественные аккаунты.\n"
+        "💰 Пополнение баланса: TON.\n"
+        "👥 Реферальная система: 10% с покупок друзей.\n\n"
+        "Выберите действие ниже:"
     )
-    await message.answer(text, reply_markup=main_kb(message.from_user.id), parse_mode="Markdown")
+    await message.answer(welcome_text, reply_markup=main_kb(message.from_user.id), parse_mode="Markdown")
 
 @dp.message(F.text == "👤 Профиль")
 async def profile(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (message.from_user.id,))
         row = await cursor.fetchone()
-        
-        cursor = await db.execute("SELECT COUNT(*) FROM purchases WHERE user_id = ?", (message.from_user.id,))
-        purchases_count = await cursor.fetchone()
-
-    text = (
-        "👤 **Ваш профиль в Sifon Market**\n\n"
-        f"🆔 Ваш ID: `{message.from_user.id}`\n"
-        f"💰 Текущий баланс: **{round(row[0], 2)} TON**\n"
-        f"🛍 Всего покупок: **{purchases_count[0]} шт.**"
-    )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(f"👤 **Ваш профиль**\n\n🆔 ID: `{message.from_user.id}`\n💰 Баланс: **{row[0]} TON**", parse_mode="Markdown")
 
 @dp.message(F.text == "💰 Пополнить баланс")
 async def topup(message: types.Message):
     text = (
-        "💎 **Пополнение баланса (TON)**\n\n"
-        "Для пополнения баланса переведите TON на указанный адрес.\n"
-        "❗️ **ВАЖНО:** Обязательно укажите свой ID в комментарии к переводу, иначе средства не зачислятся!\n\n"
-        f"📍 **Адрес кошелька:**\n`{TON_WALLET}`\n\n"
-        f"💬 **Комментарий (ВАШ ID):**\n`{message.from_user.id}`"
+        "💎 **Пополнение через TON**\n\n"
+        f"📍 Адрес кошелька:\n`{TON_WALLET}`\n\n"
+        f"💬 **ОБЯЗАТЕЛЬНЫЙ комментарий:**\n`{message.from_user.id}`\n\n"
+        "⚠️ Если не указать ID в комментарии, баланс не начислится!"
     )
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text == "👥 Реферальная система")
-async def ref_system(message: types.Message):
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT COUNT(*) FROM users WHERE referrer_id = ?", (message.from_user.id,))
-        refs_count = await cursor.fetchone()
-
-    bot_info = await bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start={message.from_user.id}"
-    
-    text = (
-        "👥 **Реферальная система**\n\n"
-        "Приглашайте друзей и получайте **10%** от суммы всех их покупок на свой баланс!\n\n"
-        f"🔗 **Ваша реферальная ссылка:**\n`{ref_link}`\n\n"
-        f"👤 Приглашено друзей: **{refs_count[0]} чел.**"
-    )
-    await message.answer(text, parse_mode="Markdown")
+async def referral(message: types.Message):
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start={message.from_user.id}"
+    await message.answer(f"👥 **Ваша ссылка:**\n`{link}`\n\n🎁 Вы получаете 10% от каждой покупки вашего друга!", parse_mode="Markdown")
 
 @dp.message(F.text == "🆘 Поддержка")
 async def support(message: types.Message):
-    await message.answer("🆘 По всем вопросам, заменам и сотрудничеству обращайтесь к: @zyozp")
+    await message.answer("🆘 По всем вопросам: @zyozp")
 
-# --- ЛОГИКА МАГАЗИНА ---
+# --- ПОКУПКА ---
 @dp.message(F.text == "🛒 Купить аккаунты")
-async def shop_cats(message: types.Message):
+async def shop(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT geo, COUNT(*) FROM products WHERE is_sold = 0 GROUP BY geo")
         cats = await cursor.fetchall()
     
-    if not cats:
-        return await message.answer("📦 В данный момент товаров нет в наличии.")
+    if not cats: return await message.answer("📦 Товаров нет в наличии.")
     
     kb = InlineKeyboardBuilder()
     for geo, count in cats:
@@ -160,194 +131,136 @@ async def shop_cats(message: types.Message):
 
 @dp.callback_query(F.data.startswith("cat_"))
 async def show_items(callback: types.CallbackQuery):
-    geo = callback.data.split("_", 1)[1]
+    geo = callback.data.split("_")[1]
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT id, type, stay, price FROM products WHERE geo = ? AND is_sold = 0 LIMIT 20", (geo,))
+        cursor = await db.execute("SELECT id, type, stay, price FROM products WHERE geo = ? AND is_sold = 0", (geo,))
         items = await cursor.fetchall()
     
     kb = InlineKeyboardBuilder()
     for i in items:
         kb.row(types.InlineKeyboardButton(text=f"⚙️ {i[1]} | ⏳ {i[2]} | 💵 {i[3]} TON", callback_data=f"buy_{i[0]}"))
-    
-    await callback.message.edit_text(f"📱 **Аккаунты {geo}:**\nВыберите нужный товар:", reply_markup=kb.as_markup(), parse_mode="Markdown")
+    await callback.message.edit_text(f"📱 **Аккаунты {geo}:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
     pid = int(callback.data.split("_")[1])
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT price, session_path, phone FROM products WHERE id = ? AND is_sold = 0", (pid,))
+        cursor = await db.execute("SELECT price, session_path, phone FROM products WHERE id = ?", (pid,))
         prod = await cursor.fetchone()
-        
-        if not prod:
-            return await callback.answer("❌ Товар уже куплен или не существует.", show_alert=True)
-
         cursor = await db.execute("SELECT balance, referrer_id FROM users WHERE user_id = ?", (callback.from_user.id,))
         user = await cursor.fetchone()
 
         if user[0] >= prod[0]:
-            # Проверка сессии перед продажей
-            try:
-                client = TelegramClient(prod[1], API_ID, API_HASH)
-                await client.connect()
-                is_auth = await client.is_user_authorized()
-                await client.disconnect()
-                if not is_auth:
-                    raise Exception()
-            except Exception:
-                await db.execute("DELETE FROM products WHERE id = ?", (pid,))
-                await db.commit()
-                return await callback.answer("❌ Ошибка сессии (аккаунт невалид). Обратитесь к администратору.", show_alert=True)
-
-            # Списываем баланс
+            # Списание и начисление реферальных
             await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (prod[0], callback.from_user.id))
+            if user[1]: # Если есть реферер
+                await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (prod[0] * 0.1, user[1]))
             
-            # Начисление рефералу (10%)
-            if user[1]:
-                ref_bonus = prod[0] * 0.10
-                await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (ref_bonus, user[1]))
-            
-            # Обновляем статус
             await db.execute("UPDATE products SET is_sold = 1 WHERE id = ?", (pid,))
             await db.execute("INSERT INTO purchases (user_id, product_id) VALUES (?, ?)", (callback.from_user.id, pid))
             await db.commit()
             
-            # Выдача
-            await callback.message.delete()
-            await callback.message.answer(
-                f"✅ **Успешная покупка!**\n\n📱 Номер: `{prod[2]}`\n💵 Списано: {prod[0]} TON\n\nФайл сессии прикреплен ниже. Код для входа вы можете запросить в меню «🔐 Получить код».", 
-                parse_mode="Markdown"
-            )
-            # Отправка файла сессии пользователю
+            await callback.message.answer(f"✅ **Успешная покупка!**\n📱 Номер: `{prod[2]}`\nФайл выдан ниже.", parse_mode="Markdown")
             await callback.message.answer_document(FSInputFile(prod[1]))
         else:
-            await callback.answer("❌ Недостаточно средств на балансе. Пополните счет.", show_alert=True)
+            await callback.answer("❌ Недостаточно TON на балансе.", show_alert=True)
 
-# --- РАБОТА С СЕССИЯМИ (ПОЛУЧИТЬ КОД) ---
+# --- ЛОГИКА КОДОВ (ЮЗЕРБОТ) ---
 @dp.message(F.text == "🔐 Получить код")
-async def get_code_menu(message: types.Message):
+async def get_code_list(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
-            SELECT pr.id, pr.phone 
-            FROM purchases p 
+            SELECT pr.id, pr.phone FROM purchases p 
             JOIN products pr ON p.product_id = pr.id 
-            WHERE p.user_id = ?
-        """, (message.from_user.id,))
+            WHERE p.user_id = ?""", (message.from_user.id,))
         rows = await cursor.fetchall()
     
-    if not rows:
-        return await message.answer("🛒 У вас еще нет купленных аккаунтов.")
+    if not rows: return await message.answer("🛍 У вас еще нет покупок.")
     
     kb = InlineKeyboardBuilder()
-    for r in rows:
-        kb.row(types.InlineKeyboardButton(text=f"📱 {r[1]}", callback_data=f"code_{r[0]}"))
-    
+    for r in rows: kb.row(types.InlineKeyboardButton(text=f"📱 {r[1]}", callback_data=f"getcode_{r[0]}"))
     await message.answer("🔐 **Выберите аккаунт для получения кода:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
 
-@dp.callback_query(F.data.startswith("code_"))
+@dp.callback_query(F.data.startswith("getcode_"))
 async def fetch_code(callback: types.CallbackQuery):
     pid = int(callback.data.split("_")[1])
-    await callback.answer("⏳ Запрашиваю код...", show_alert=False)
-    
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT session_path FROM products WHERE id = ?", (pid,))
-        row = await cursor.fetchone()
+        cursor = await db.execute("SELECT session_path, phone FROM products WHERE id = ?", (pid,))
+        prod = await cursor.fetchone()
     
-    if not row:
-        return await callback.message.answer("❌ Аккаунт не найден.")
-    
-    session_path = row[0]
-    
-    # Использование кэшированного клиента (чтобы не заходить/выходить постоянно)
-    if session_path not in active_clients:
-        client = TelegramClient(session_path, API_ID, API_HASH)
+    path = prod[0]
+    if path not in active_clients:
+        client = TelegramClient(path, API_ID, API_HASH)
         await client.connect()
-        active_clients[session_path] = client
+        active_clients[path] = client
     else:
-        client = active_clients[session_path]
+        client = active_clients[path]
 
     try:
-        if not await client.is_user_authorized():
-             await callback.message.answer("❌ Сессия мертва. Обратитесь к @zyozp за заменой.")
-             return
-
         msgs = await client.get_messages(777000, limit=1)
-        if msgs and msgs[0].message:
-            await callback.message.answer(f"📩 **Последнее сообщение от Telegram:**\n\n`{msgs[0].message}`", parse_mode="Markdown")
+        if msgs:
+            await callback.message.answer(f"📩 **Код для {prod[1]}:**\n`{msgs[0].message}`", parse_mode="Markdown")
         else:
-            await callback.message.answer("⚠️ Код еще не пришел. Подождите пару минут и попробуйте снова.")
-    except Exception as e:
-        await callback.message.answer("❌ **Ошибка сессии — обратитесь к администратору за заменой**")
+            await callback.answer("⏳ Код еще не пришел...", show_alert=True)
+    except:
+        await callback.message.answer("❌ Ошибка сессии — обратитесь к @zyozp")
 
-
-# --- АДМИН ПАНЕЛЬ ---
+# --- АДМИНКА ---
 @dp.message(F.text == "📢 Рассылка", F.from_user.id == ADMIN_ID)
-async def broadcast_1(message: types.Message, state: FSMContext):
-    await message.answer("📝 Введите текст для рассылки всем пользователям:")
+async def broadcast(message: types.Message, state: FSMContext):
+    await message.answer("📝 Введите текст рассылки:")
     await state.set_state(ShopStates.wait_broadcast_text)
 
 @dp.message(ShopStates.wait_broadcast_text)
-async def broadcast_2(message: types.Message, state: FSMContext):
+async def broadcast_send(message: types.Message, state: FSMContext):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT user_id FROM users")
         users = await cursor.fetchall()
-    
-    count = 0
     for u in users:
-        try:
-            await bot.send_message(u[0], message.text)
-            count += 1
-            await asyncio.sleep(0.05) # Защита от флуда
-        except:
-            pass
-    
-    await message.answer(f"✅ Рассылка успешно завершена.\nДоставлено: {count} пользователям.")
+        try: await bot.send_message(u[0], message.text)
+        except: pass
+    await message.answer("✅ Готово!")
     await state.clear()
 
 @dp.message(F.text == "➕ Добавить товар", F.from_user.id == ADMIN_ID)
-async def add_1(message: types.Message, state: FSMContext):
-    await message.answer("📎 Отправьте `.session` файл аккаунта:")
+async def add_item(message: types.Message, state: FSMContext):
+    await message.answer("📎 Отправьте .session файл:")
     await state.set_state(ShopStates.wait_acc_file)
 
 @dp.message(ShopStates.wait_acc_file, F.document)
-async def add_2(message: types.Message, state: FSMContext):
-    if not message.document.file_name.endswith(".session"):
-        return await message.answer("❌ Пожалуйста, отправьте файл с расширением .session")
-        
+async def add_file(message: types.Message, state: FSMContext):
     path = f"sessions/{message.document.file_name}"
     await bot.download(message.document, destination=path)
     await state.update_data(path=path, phone=message.document.file_name.replace(".session", ""))
-    await message.answer("💰 Укажите цену (в TON, например 1.5):")
+    await message.answer("💰 Цена (TON):")
     await state.set_state(ShopStates.wait_acc_price)
 
 @dp.message(ShopStates.wait_acc_price)
-async def add_3(message: types.Message, state: FSMContext):
-    try:
-        await state.update_data(price=float(message.text))
-        await message.answer("🌍 Укажите гео (например, Индонезия):")
-        await state.set_state(ShopStates.wait_acc_geo)
-    except ValueError:
-        await message.answer("❌ Цена должна быть числом!")
+async def add_price(message: types.Message, state: FSMContext):
+    await state.update_data(price=float(message.text))
+    await message.answer("🌍 Гео (например: Индонезия):")
+    await state.set_state(ShopStates.wait_acc_geo)
 
 @dp.message(ShopStates.wait_acc_geo)
-async def add_4(message: types.Message, state: FSMContext):
+async def add_geo(message: types.Message, state: FSMContext):
     await state.update_data(geo=message.text)
-    await message.answer("⏳ Укажите отлегу (например, 7 дней):")
+    await message.answer("⏳ Отлега:")
     await state.set_state(ShopStates.wait_acc_stay)
 
 @dp.message(ShopStates.wait_acc_stay)
-async def add_5(message: types.Message, state: FSMContext):
+async def add_stay(message: types.Message, state: FSMContext):
     await state.update_data(stay=message.text)
-    await message.answer("🛠 Укажите тип (например, Tdata/Session):")
+    await message.answer("🛠 Тип:")
     await state.set_state(ShopStates.wait_acc_type)
 
 @dp.message(ShopStates.wait_acc_type)
-async def add_6(message: types.Message, state: FSMContext):
-    d = await state.get_data()
+async def add_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT INTO products (phone, price, session_path, geo, stay, type) VALUES (?, ?, ?, ?, ?, ?)",
-                         (d['phone'], d['price'], d['path'], d['geo'], d['stay'], message.text))
+                         (data['phone'], data['price'], data['path'], data['geo'], data['stay'], message.text))
         await db.commit()
-    await message.answer(f"✅ Товар успешно добавлен.\nГео: {d['geo']}\nЦена: {d['price']} TON")
+    await message.answer("✅ Товар добавлен!")
     await state.clear()
 
 @dp.message(F.text == "💎 Выдать баланс", F.from_user.id == ADMIN_ID)
@@ -356,32 +269,23 @@ async def give_bal(message: types.Message, state: FSMContext):
     await state.set_state(ShopStates.wait_bal_id)
 
 @dp.message(ShopStates.wait_bal_id)
-async def give_bal_2(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        return await message.answer("❌ ID должен быть числом!")
-    await state.update_data(uid=int(message.text))
-    await message.answer("Укажите сумму пополнения (в TON):")
+async def bal_id(message: types.Message, state: FSMContext):
+    await state.update_data(uid=message.text)
+    await message.answer("Сколько TON начислить?")
     await state.set_state(ShopStates.wait_bal_amount)
 
 @dp.message(ShopStates.wait_bal_amount)
-async def give_bal_3(message: types.Message, state: FSMContext):
-    try:
-        amount = float(message.text)
-        d = await state.get_data()
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, d['uid']))
-            await db.commit()
-        await message.answer(f"✅ Баланс пользователя `{d['uid']}` успешно пополнен на {amount} TON.", parse_mode="Markdown")
-        await state.clear()
-    except ValueError:
-        await message.answer("❌ Сумма должна быть числом!")
+async def bal_final(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (float(message.text), data['uid']))
+        await db.commit()
+    await message.answer("✅ Баланс пополнен!")
+    await state.clear()
 
-# --- ЗАПУСК ---
 async def main():
-    if not os.path.exists("sessions"):
-        os.makedirs("sessions")
+    if not os.path.exists("sessions"): os.makedirs("sessions")
     await init_db()
-    print("Sifon Market Bot запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

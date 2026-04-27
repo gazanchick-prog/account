@@ -7,10 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from telethon import TelegramClient
-from telethon.errors import UserDeactivatedError, AuthKeyUnregisteredError
 from dotenv import load_dotenv
 
-# --- КОНФИГУРАЦИЯ ---
+# --- Инициализация конфигурации ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
@@ -22,7 +21,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 DB_NAME = "sifon_market.db"
 
-# --- СОСТОЯНИЯ ---
+# --- Определение состояний FSM ---
 class ShopStates(StatesGroup):
     wait_bal_id = State()
     wait_bal_amount = State()
@@ -37,10 +36,9 @@ class ShopStates(StatesGroup):
     wait_promo_limit = State()
     wait_promo_activate = State()
 
-# --- БАЗА ДАННЫХ ---
+# --- Работа с базой данных ---
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # Добавлена колонка rules_accepted
         await db.execute("""CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY, 
             balance REAL DEFAULT 0, 
@@ -55,7 +53,7 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS used_promos (user_id INTEGER, promo_id INTEGER)")
         await db.commit()
 
-# --- КЛАВИАТУРЫ ---
+# --- Формирование интерфейса ---
 def main_kb(user_id):
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🛒 Купить"), types.KeyboardButton(text="👤 Профиль"))
@@ -66,7 +64,7 @@ def main_kb(user_id):
         builder.row(types.KeyboardButton(text="📢 Рассылка"), types.KeyboardButton(text="🎁 Создать промо"))
     return builder.as_markup(resize_keyboard=True)
 
-# --- ПРИНЯТИЕ ПРАВИЛ ---
+# --- Обработка приветствия и правил ---
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -84,11 +82,11 @@ async def cmd_start(message: types.Message):
             kb.row(types.InlineKeyboardButton(text="✅ Принять", callback_data="accept_rules"))
             return await message.answer(
                 "👋 **Добро пожаловать в SifonMarket!**\n\n"
-                "Для использования бота необходимо ознакомиться и принять правила сервиса.", 
+                "Для продолжения работы необходимо подтвердить согласие с правилами сервиса.", 
                 reply_markup=kb.as_markup(), parse_mode="Markdown"
             )
     
-    await message.answer("🛒 **Главное меню:**", reply_markup=main_kb(message.from_user.id), parse_mode="Markdown")
+    await message.answer("🛒 Главное меню:", reply_markup=main_kb(message.from_user.id))
 
 @dp.callback_query(F.data == "accept_rules")
 async def accept_rules(callback: types.CallbackQuery):
@@ -96,22 +94,32 @@ async def accept_rules(callback: types.CallbackQuery):
         await db.execute("UPDATE users SET rules_accepted = 1 WHERE user_id = ?", (callback.from_user.id,))
         await db.commit()
     await callback.message.delete()
-    await callback.message.answer("✅ Правила приняты! Теперь вам доступен весь функционал.", reply_markup=main_kb(callback.from_user.id))
+    await callback.message.answer("Удачных покупок", reply_markup=main_kb(callback.from_user.id))
 
-# --- ИНФОРМАЦИЯ И ПОДДЕРЖКА ---
-@dp.message(F.text == "🆘 Поддержка")
-async def support(message: types.Message):
-    await message.answer("🆘 По всем вопросам обратитесь к @zyozp")
-
+# --- Информационные разделы ---
 @dp.message(F.text == "ℹ️ Информация")
 async def info_menu(message: types.Message):
     kb = InlineKeyboardBuilder()
     kb.row(types.InlineKeyboardButton(text="📜 Правила сервиса", url="https://telegra.ph/Pravila-servisa-04-26"))
     kb.row(types.InlineKeyboardButton(text="🔐 Политика конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-04-26-19"))
     kb.row(types.InlineKeyboardButton(text="🤝 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-04-26-22"))
-    await message.answer("📂 **Юридическая информация:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
+    
+    info_text = (
+        "💎 **SifonMarket** — это ведущий автоматизированный сервис по продаже цифровых активов.\n\n"
+        "🚀 **Наши преимущества:**\n"
+        "• Самые низкие цены на рынке за счет оптимизации логистики.\n"
+        "• Мгновенная выдача товара сразу после подтверждения транзакции.\n"
+        "• Гарантия валидности: автоматизированная проверка сессий перед продажей.\n"
+        "• Постоянные обновления и расширение ассортимента.\n\n"
+        "Мы ценим доверие наших клиентов и обеспечиваем полную конфиденциальность сделок."
+    )
+    await message.answer(info_text, reply_markup=kb.as_markup(), parse_mode="Markdown")
 
-# --- ПРОФИЛЬ И ПОПОЛНЕНИЕ ---
+@dp.message(F.text == "🆘 Поддержка")
+async def support(message: types.Message):
+    await message.answer("🆘 По техническим вопросам: @zyozp")
+
+# --- Профиль и система лояльности ---
 @dp.message(F.text == "👤 Профиль")
 async def profile(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -126,15 +134,15 @@ async def topup(message: types.Message):
     await message.answer(
         f"💎 **Пополнение (TON)**\n\n"
         f"📍 Адрес:\n`{TON_WALLET}`\n\n"
-        f"💬 Комментарий:\n`{message.from_user.id}`\n\n"
-        f"⚠️ Без комментария баланс не зачислится!", 
+        f"💬 Комментарий (Обязательно):\n`{message.from_user.id}`\n\n"
+        f"⚠️ Система не сможет зачислить средства без указания вашего ID в комментарии.", 
         parse_mode="Markdown"
     )
 
-# --- ПРОМОКОДЫ ---
+# --- Логика промокодов ---
 @dp.callback_query(F.data == "act_promo")
 async def promo_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("✏️ Введите ваш промокод:")
+    await callback.message.answer("✏️ Введите промокод:")
     await state.set_state(ShopStates.wait_promo_activate)
 
 @dp.message(ShopStates.wait_promo_activate)
@@ -143,30 +151,30 @@ async def promo_activate(message: types.Message, state: FSMContext):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT id, reward, max_uses, current_uses FROM promocodes WHERE code = ?", (code,))
         promo = await cursor.fetchone()
-        if not promo: return await message.answer("❌ Промокод не существует.")
+        if not promo: return await message.answer("❌ Промокод не найден.")
         
         cursor = await db.execute("SELECT 1 FROM used_promos WHERE user_id = ? AND promo_id = ?", (message.from_user.id, promo[0]))
-        if await cursor.fetchone(): return await message.answer("❌ Вы уже использовали этот код.")
+        if await cursor.fetchone(): return await message.answer("❌ Промокод уже был активирован ранее.")
         
-        if promo[3] >= promo[2]: return await message.answer("❌ Лимит использований исчерпан.")
+        if promo[3] >= promo[2]: return await message.answer("❌ Лимит активаций исчерпан.")
 
         await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (promo[1], message.from_user.id))
         await db.execute("UPDATE promocodes SET current_uses = current_uses + 1 WHERE id = ?", (promo[0],))
         await db.execute("INSERT INTO used_promos (user_id, promo_id) VALUES (?, ?)", (message.from_user.id, promo[0]))
         await db.commit()
-        await message.answer(f"✅ Успешно! Вам начислено **{promo[1]} TON**.", parse_mode="Markdown")
+        await message.answer(f"✅ Успешно! Начислено: **{promo[1]} TON**.", parse_mode="Markdown")
     await state.clear()
 
-# --- МАГАЗИН (КУПИТЬ) ---
+# --- Торговый функционал ---
 @dp.message(F.text == "🛒 Купить")
 async def shop_cats(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT geo, COUNT(*) FROM products WHERE is_sold = 0 GROUP BY geo")
         cats = await cursor.fetchall()
-    if not cats: return await message.answer("📦 Товаров нет.")
+    if not cats: return await message.answer("📦 В данный момент товаров нет в наличии.")
     kb = InlineKeyboardBuilder()
     for geo, count in cats: kb.row(types.InlineKeyboardButton(text=f"📍 {geo} ({count} шт.)", callback_data=f"cat_{geo}"))
-    await message.answer("📁 **Локации:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
+    await message.answer("📁 Выберите локацию:", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("cat_"))
 async def show_items(callback: types.CallbackQuery):
@@ -176,7 +184,7 @@ async def show_items(callback: types.CallbackQuery):
         items = await cursor.fetchall()
     kb = InlineKeyboardBuilder()
     for i in items: kb.row(types.InlineKeyboardButton(text=f"⚙️ {i[1]} | {i[2]} | {i[3]} TON", callback_data=f"buy_{i[0]}"))
-    await callback.message.edit_text(f"📱 **Аккаунты {geo}:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
+    await callback.message.edit_text(f"📱 Доступные аккаунты ({geo}):", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
@@ -188,7 +196,6 @@ async def process_buy(callback: types.CallbackQuery):
         user = await cursor.fetchone()
 
         if user[0] >= prod[0]:
-            # Проверка валида
             try:
                 client = TelegramClient(prod[1], API_ID, API_HASH)
                 await client.connect()
@@ -196,17 +203,17 @@ async def process_buy(callback: types.CallbackQuery):
                 await client.disconnect()
                 if not is_ok: raise Exception()
             except:
-                return await callback.answer("ошибка сессии - обратитесь к администратору за заменой", show_alert=True)
+                return await callback.answer("Ошибка сессии. Обратитесь в поддержку для замены.", show_alert=True)
 
             await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (prod[0], callback.from_user.id))
             await db.execute("UPDATE products SET is_sold = 1 WHERE id = ?", (pid,))
             await db.execute("INSERT INTO purchases (user_id, product_id) VALUES (?, ?)", (callback.from_user.id, pid))
             await db.commit()
-            await callback.message.answer(f"✅ **Куплено!**\n📱 Номер: `{prod[2]}`\nКод можно получить в 'Мои покупки'.", parse_mode="Markdown")
+            await callback.message.answer(f"✅ **Покупка завершена!**\n📱 Номер: `{prod[2]}`\nКод доступа можно запросить в разделе 'Мои покупки'.", parse_mode="Markdown")
         else:
-            await callback.answer("❌ Недостаточно средств", show_alert=True)
+            await callback.answer("❌ Недостаточно средств на балансе.", show_alert=True)
 
-# --- МОИ ПОКУПКИ (КОДЫ) ---
+# --- История и выдача кодов ---
 @dp.message(F.text == "🛍 Мои покупки")
 async def my_purchases(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -214,10 +221,10 @@ async def my_purchases(message: types.Message):
                                   JOIN products pr ON p.product_id = pr.id 
                                   WHERE p.user_id = ?""", (message.from_user.id,))
         rows = await cursor.fetchall()
-    if not rows: return await message.answer("🛍 Покупок пока нет.")
+    if not rows: return await message.answer("🛍 История покупок пуста.")
     kb = InlineKeyboardBuilder()
     for r in rows: kb.row(types.InlineKeyboardButton(text=f"📱 {r[1]}", callback_data=f"view_{r[0]}"))
-    await message.answer("📦 **Ваши аккаунты:**", reply_markup=kb.as_markup(), parse_mode="Markdown")
+    await message.answer("📦 Ваши аккаунты:", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("view_"))
 async def view_item(callback: types.CallbackQuery):
@@ -239,17 +246,17 @@ async def get_code(callback: types.CallbackQuery):
         await client.connect()
         msgs = await client.get_messages(777000, limit=1)
         if msgs:
-            await callback.message.answer(f"📩 **Код:**\n`{msgs[0].message}`", parse_mode="Markdown")
+            await callback.message.answer(f"📩 **Код из Telegram:**\n`{msgs[0].message}`", parse_mode="Markdown")
         else:
-            await callback.message.answer("📫 Код еще не пришел.")
+            await callback.message.answer("📫 Сообщение с кодом еще не поступило.")
         await client.disconnect()
     except:
-        await callback.message.answer("❌ **ошибка сессии - обратитесь к администратору за заменой**")
+        await callback.message.answer("❌ Ошибка авторизации сессии. Обратитесь к администратору.")
 
-# --- АДМИН ПАНЕЛЬ ---
+# --- Панель управления (Admin) ---
 @dp.message(F.text == "📢 Рассылка", F.from_user.id == ADMIN_ID)
 async def admin_bc(message: types.Message, state: FSMContext):
-    await message.answer("📝 Введите текст рассылки:")
+    await message.answer("📝 Введите текст уведомления:")
     await state.set_state(ShopStates.wait_broadcast_text)
 
 @dp.message(ShopStates.wait_broadcast_text)
@@ -260,7 +267,7 @@ async def bc_process(message: types.Message, state: FSMContext):
     for u in users:
         try: await bot.send_message(u[0], message.text)
         except: pass
-    await message.answer("✅ Рассылка завершена.")
+    await message.answer("✅ Рассылка завершена успешно.")
     await state.clear()
 
 @dp.message(F.text == "🎁 Создать промо", F.from_user.id == ADMIN_ID)
@@ -286,12 +293,12 @@ async def adm_pr_4(message: types.Message, state: FSMContext):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT INTO promocodes (code, reward, max_uses) VALUES (?, ?, ?)", (d['n'], d['r'], int(message.text)))
         await db.commit()
-    await message.answer(f"✅ Промокод `{d['n']}` на {d['r']} TON создан.")
+    await message.answer(f"✅ Промокод `{d['n']}` на {d['r']} TON успешно создан.")
     await state.clear()
 
 @dp.message(F.text == "➕ Товар", F.from_user.id == ADMIN_ID)
 async def adm_add_1(message: types.Message, state: FSMContext):
-    await message.answer("Скинь .session файл:")
+    await message.answer("Прикрепите файл .session:")
     await state.set_state(ShopStates.wait_acc_file)
 
 @dp.message(ShopStates.wait_acc_file, F.document)
@@ -299,13 +306,13 @@ async def adm_add_2(message: types.Message, state: FSMContext):
     path = f"sessions/{message.document.file_name}"
     await bot.download(message.document, destination=path)
     await state.update_data(p=path, ph=message.document.file_name.replace(".session", ""))
-    await message.answer("Цена:")
+    await message.answer("Укажите стоимость:")
     await state.set_state(ShopStates.wait_acc_price)
 
 @dp.message(ShopStates.wait_acc_price)
 async def adm_add_3(message: types.Message, state: FSMContext):
     await state.update_data(pr=float(message.text))
-    await message.answer("Локация:")
+    await message.answer("Геолокация:")
     await state.set_state(ShopStates.wait_acc_geo)
 
 @dp.message(ShopStates.wait_acc_geo)
@@ -317,7 +324,7 @@ async def adm_add_4(message: types.Message, state: FSMContext):
 @dp.message(ShopStates.wait_acc_stay)
 async def adm_add_5(message: types.Message, state: FSMContext):
     await state.update_data(s=message.text)
-    await message.answer("Тип:")
+    await message.answer("Тип аккаунта:")
     await state.set_state(ShopStates.wait_acc_type)
 
 @dp.message(ShopStates.wait_acc_type)
@@ -327,18 +334,18 @@ async def adm_add_6(message: types.Message, state: FSMContext):
         await db.execute("INSERT INTO products (phone, price, session_path, geo, stay, type) VALUES (?, ?, ?, ?, ?, ?)",
                          (d['ph'], d['pr'], d['p'], d['g'], d['s'], message.text))
         await db.commit()
-    await message.answer("✅ Товар в продаже.")
+    await message.answer("✅ Товар успешно добавлен в магазин.")
     await state.clear()
 
 @dp.message(F.text == "💎 Баланс", F.from_user.id == ADMIN_ID)
 async def adm_bal_1(message: types.Message, state: FSMContext):
-    await message.answer("ID юзера:")
+    await message.answer("ID пользователя:")
     await state.set_state(ShopStates.wait_bal_id)
 
 @dp.message(ShopStates.wait_bal_id)
 async def adm_bal_2(message: types.Message, state: FSMContext):
     await state.update_data(u=message.text)
-    await message.answer("Сумма:")
+    await message.answer("Сумма начисления:")
     await state.set_state(ShopStates.wait_bal_amount)
 
 @dp.message(ShopStates.wait_bal_amount)
@@ -347,10 +354,10 @@ async def adm_bal_3(message: types.Message, state: FSMContext):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (float(message.text), d['u']))
         await db.commit()
-    await message.answer("✅ Баланс выдан.")
+    await message.answer("✅ Средства успешно зачислены.")
     await state.clear()
 
-# --- ЗАПУСК ---
+# --- Точка входа ---
 async def main():
     if not os.path.exists("sessions"): os.makedirs("sessions")
     await init_db()

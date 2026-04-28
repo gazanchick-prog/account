@@ -3,3 +3,4 @@ aiosqlite
 telethon
 aiohttp
 python-dotenv
+aiocryptopay
